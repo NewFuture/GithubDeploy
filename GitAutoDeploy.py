@@ -1,60 +1,60 @@
 #!/usr/bin/env python
 
-import json, urlparse, sys, os
+import json
+import urlparse
+import sys
+import os
+import time
 from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
 from subprocess import call
+
 
 class GitAutoDeploy(BaseHTTPRequestHandler):
 
     CONFIG_FILEPATH = './GitAutoDeploy.conf.json'
+    LOG_FILE = "log.txt"
     config = None
     quiet = False
     daemon = False
 
     @classmethod
-    def getConfig(myClass):
-        if(myClass.config == None):
-            try:
-                configString = open(myClass.CONFIG_FILEPATH).read()
-            except:
-                sys.exit('Could not load ' + myClass.CONFIG_FILEPATH + ' file')
+    def getConfig(cls):
+        if not cls.config:
+            if os.path.isfile(cls.CONFIG_FILEPATH):
+                try:
+                    configfile = open(cls.CONFIG_FILEPATH)
+                    configString = configfile.read()
+                    configfile.close()
+                    cls.config = json.loads(configString)
+                except:
+                    cls.log('Could not load config json file: ' +
+                            cls.CONFIG_FILEPATH)
 
-            try:
-                myClass.config = json.loads(configString)
-            except:
-                sys.exit(myClass.CONFIG_FILEPATH + ' file is not valid json')
+                for repository in cls.config['repositories']:
+                    if not cls.checkPathWithUrl(repository['path'], repository['url']):
+                        sys.exit('Directory  is not a Git repository')
+                        break
 
-            for repository in myClass.config['repositories']:
-                if(not os.path.isdir(repository['path'])):
-                    sys.exit('Directory ' + repository['path'] + ' not found')
-                # Check for a repository with a local or a remote GIT_WORK_DIR
-                if not os.path.isdir(os.path.join(repository['path'], '.git')) \
-                   and not os.path.isdir(os.path.join(repository['path'], 'objects')):
-                    sys.exit('Directory ' + repository['path'] + ' is not a Git repository')
+            elif not cls.quiet:  # try user input
+                cls.config = cls.setConfig()
 
-        return myClass.config
+        return cls.config
 
     def do_POST(self):
         event = self.headers.getheader('X-Github-Event')
+        self.log(event + " received")
         if event == 'ping':
-            if not self.quiet:
-                print 'Ping event received'
             self.respond(204)
-            return
-        if event != 'push':
-            if not self.quiet:
-                print 'We only handle ping and push events'
+        elif event != 'push':
             self.respond(304)
-            return
-
-        self.respond(204)
-
-        urls = self.parseRequest()
-        for url in urls:
-            paths = self.getMatchingPaths(url)
-            for path in paths:
-                self.fetch(path)
-                self.deploy(path)
+        else:
+            self.respond(204)
+            urls = self.parseRequest()
+            for url in urls:
+                self.log(url)
+                paths = self.getMatchingPaths(url)
+                for path in paths:
+                    self.deploy(path)
 
     def parseRequest(self):
         length = int(self.headers.getheader('content-length'))
@@ -76,62 +76,113 @@ class GitAutoDeploy(BaseHTTPRequestHandler):
         self.send_header('Content-type', 'text/plain')
         self.end_headers()
 
-    def fetch(self, path):
-        if(not self.quiet):
-            print "\nPost push request received"
-            print 'Updating ' + path
-        call(['cd "' + path + '" && git fetch'], shell=True)
-
     def deploy(self, path):
+        self.log('Updating : ' + path)
+        call(['cd "' + path + '" && git fetch'], shell=True)
         config = self.getConfig()
         for repository in config['repositories']:
             if(repository['path'] == path):
-                if 'deploy' in repository:
+                if 'cmd' in repository:
                     branch = None
                     if 'branch' in repository:
                         branch = repository['branch']
 
                     if branch is None or branch == self.branch:
-                        if(not self.quiet):
-                            print 'Executing deploy command'
-                        call(['cd "' + path + '" && ' + repository['deploy']], shell=True)
-                        
-                    elif not self.quiet:
-                        print 'Push to different branch (%s != %s), not deploying' % (branch, self.branch)
+                        self.log('Executing deploy command :' +
+                                 repository['cmd'])
+                        call(['cd "' + path + '" && ' +
+                              repository['cmd']], shell=True)
+                    else:
+                        self.log('Push to different branch (%s != %s), not deploying' % (
+                            branch, self.branch))
                 break
+
+    @classmethod
+    def log(cls, *messages):
+        if cls.quiet:
+            logfile = open(cls.LOG_FILE, 'a')
+            logtime = time.ctime()
+            for msg in messages:
+                logfile.write("[%s]%s\n" % (logtime, msg))
+            logfile.close()
+        else:
+            for msg in messages:
+                print(msg)
+
+    @classmethod
+    def setConfig(cls):
+        config = {}
+        config['port'] = int(raw_input('*set AutoDeploy Server port:'))
+        config['repositories'] = []
+        while True:
+            cls.log("Add a github repository")
+            repository = {}
+            giturl = raw_input('*set the git repository url:').strip()
+            if not giturl:
+                print('Finish setting')
+                break
+
+            path = raw_input('*set your local directory(/my/repo):').strip()
+            if not cls.checkPathWithUrl(path, giturl):
+                break
+
+            repository['url'] = giturl
+            repository['path'] = path
+            repository['branch'] = raw_input(' set Branch[None]:').strip()
+            repository['cmd'] = raw_input(' set Deploy cmd[None]:').strip()
+            config['repositories'].append(repository)
+
+        configfile = open(cls.CONFIG_FILEPATH, 'w')
+        configfile.write(json.dumps(config))
+        configfile.close()
+        cls.log('saving config to ' + cls.CONFIG_FILEPATH)
+        return config
+
+    @staticmethod
+    def checkPathWithUrl(path, url):
+        if not path:
+            sys.exit('Path can not be None')
+        elif not os.path.isdir(path):
+            GitAutoDeploy.log('try to create path: ' + path)
+            os.makedirs(path)
+
+        if not os.listdir(path):  # empty folder
+            cloneCMD = 'git clone %s %s' % (url, path)
+            GitAutoDeploy.log('try : ' + cloneCMD)
+            call([cloneCMD], shell=True)
+        elif not os.path.isdir(os.path.join(path, '.git')) and not os.path.isdir(os.path.join(path, 'objects')):
+            sys.exit('Directory ' + path + ' is not a Git repository')
+            return False
+        return True
+
 
 def main():
     try:
         server = None
-        for arg in sys.argv: 
+        for arg in sys.argv:
             if(arg == '-d' or arg == '--daemon-mode'):
                 GitAutoDeploy.daemon = True
                 GitAutoDeploy.quiet = True
             if(arg == '-q' or arg == '--quiet'):
                 GitAutoDeploy.quiet = True
-                
+
         if(GitAutoDeploy.daemon):
             pid = os.fork()
             if(pid != 0):
                 sys.exit()
             os.setsid()
 
-        if(not GitAutoDeploy.quiet):
-            print 'Github Autodeploy Service v0.2 started'
-        else:
-            print 'Github Autodeploy Service v 0.2 started in daemon mode'
-             
-        server = HTTPServer(('', GitAutoDeploy.getConfig()['port']), GitAutoDeploy)
+        port = GitAutoDeploy.getConfig()['port']
+        server = HTTPServer(('', port), GitAutoDeploy)
+        GitAutoDeploy.log('Github Autodeploy Service start listen: %i' % port)
         server.serve_forever()
-    except (KeyboardInterrupt, SystemExit) as e:
-        if(e): # wtf, why is this creating a new line?
-            print >> sys.stderr, e
 
+    except (KeyboardInterrupt, SystemExit) as e:
+        GitAutoDeploy.log('stop')
+        if(e):
+            GitAutoDeploy.log(e)
         if(not server is None):
             server.socket.close()
 
-        if(not GitAutoDeploy.quiet):
-            print 'Goodbye'
-
 if __name__ == '__main__':
-     main()
+    main()
