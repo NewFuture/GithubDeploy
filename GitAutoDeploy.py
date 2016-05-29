@@ -1,12 +1,19 @@
 #!/usr/bin/env python
 
 import json
-import urlparse
 import sys
 import os
 import time
 from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
 from subprocess import call
+
+
+def get_full_name(url):
+    [owner, name] = url.split('/')[-2:]
+    owner = owner.split(':')[-1]  # ssh
+    if name[-4:] == '.git':
+        name = name[:-4]
+    return '%s/%s' % (owner, name)
 
 
 class GitAutoDeploy(BaseHTTPRequestHandler):
@@ -49,25 +56,24 @@ class GitAutoDeploy(BaseHTTPRequestHandler):
             self.respond(304)
         else:
             self.respond(204)
-            urls = self.parseRequest()
-            for url in urls:
-                self.log(url)
-                paths = self.getMatchingPaths(url)
-                for path in paths:
-                    self.deploy(path)
+            repositories = self.parseRequest()
+            self.log(repositories['url'])
+            paths = self.getMatchingPaths(repositories['full_name'])
+            for path in paths:
+                self.deploy(path)
 
     def parseRequest(self):
         length = int(self.headers.getheader('content-length'))
         body = self.rfile.read(length)
         payload = json.loads(body)
         self.branch = payload['ref']
-        return [payload['repository']['url']]
+        return payload['repository']
 
-    def getMatchingPaths(self, repoUrl):
+    def getMatchingPaths(self, full_name):
         res = []
         config = self.getConfig()
         for repository in config['repositories']:
-            if(repository['url'] == repoUrl):
+            if(get_full_name(repository['url']) == full_name):
                 res.append(repository['path'])
         return res
 
