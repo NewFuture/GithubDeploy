@@ -93,7 +93,7 @@ class GitAutoDeploy(BaseHTTPRequestHandler):
                     if 'branch' in repository:
                         branch = repository['branch']
 
-                    if branch is None or branch == self.branch:
+                    if branch is None or branch == self.branch or branch == os.path.basename(self.branch):
                         self.log('Executing deploy command :' +
                                  repository['cmd'])
                         call(['cd "' + path + '" && ' +
