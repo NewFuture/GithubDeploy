@@ -87,21 +87,20 @@ class GitAutoDeploy(BaseHTTPRequestHandler):
         config = self.getConfig()
         for repository in config['repositories']:
             if(repository['path'] == path):
-                if 'cmd' in repository:
-                    cmd = repository['cmd']
-                else:
-                    cmd = "git pull"
                 if 'branch' in repository:
                     branch = repository['branch']
                 else:
                     branch = None
+                if 'cmd' in repository and repository['cmd']:
+                    cmd = repository['cmd']
+                else:
+                    cmd = "git pull"
 
-                if (branch == None) or (branch == self.branch) or (branch == os.path.basename(self.branch)):
+                if  branch in [None, '', self.branch, os.path.basename(self.branch)]:
                     self.log('Executing deploy command :' + cmd)
                     call(['cd "%s" && %s' % (path, cmd)], shell=True)
                 else:
-                    self.log('Push to different branch (%s != %s), not deploying' % (
-                        branch, self.branch))
+                    self.log('Do nothing for different branch (%s != %s)' % (branch, self.branch))
                 break
 
     @classmethod
