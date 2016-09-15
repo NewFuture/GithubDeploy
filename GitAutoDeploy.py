@@ -38,7 +38,7 @@ class GitAutoDeploy(BaseHTTPRequestHandler):
                             cls.CONFIG_FILEPATH)
 
                 for repository in cls.config['repositories']:
-                    if not cls.checkPathWithUrl(repository['path'], repository['url']):
+                    if not cls.checkPathWithUrl(repository['path'], repository['url'], repository['branch']):
                         sys.exit('Directory  is not a Git repository')
                         break
 
@@ -129,12 +129,13 @@ class GitAutoDeploy(BaseHTTPRequestHandler):
                 break
 
             path = raw_input('*set your local directory(/my/repo):').strip()
-            if not cls.checkPathWithUrl(path, giturl):
+            branch = raw_input(' set Branch[None]:').strip()
+            if not cls.checkPathWithUrl(path, giturl, branch):
                 break
 
             repository['url'] = giturl
             repository['path'] = path
-            repository['branch'] = raw_input(' set Branch[None]:').strip()
+            repository['branch'] = branch
             repository['cmd'] = raw_input(' set Deploy cmd[None]:').strip()
             config['repositories'].append(repository)
 
@@ -145,7 +146,7 @@ class GitAutoDeploy(BaseHTTPRequestHandler):
         return config
 
     @staticmethod
-    def checkPathWithUrl(path, url):
+    def checkPathWithUrl(path, url, branch=None):
         if not path:
             sys.exit('Path can not be None')
         elif not os.path.isdir(path):
@@ -153,7 +154,10 @@ class GitAutoDeploy(BaseHTTPRequestHandler):
             os.makedirs(path)
 
         if not os.listdir(path):  # empty folder
-            cloneCMD = 'git clone %s %s' % (url, path)
+            if branch:
+                cloneCMD = 'git clone -b %s %s "%s"' % (branch, url, path)
+            else:
+                cloneCMD = 'git clone %s "%s"' % (url, path)
             GitAutoDeploy.log('try : ' + cloneCMD)
             call([cloneCMD], shell=True)
         elif not os.path.isdir(os.path.join(path, '.git')) and not os.path.isdir(os.path.join(path, 'objects')):
