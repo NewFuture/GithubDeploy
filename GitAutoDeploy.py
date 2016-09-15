@@ -57,7 +57,7 @@ class GitAutoDeploy(BaseHTTPRequestHandler):
         else:
             self.respond(204)
             repositories = self.parseRequest()
-            self.log(repositories['url'])
+            self.log('Remote repository:'+repositories['url'])
             paths = self.getMatchingPaths(repositories['full_name'])
             for path in paths:
                 self.deploy(path)
@@ -83,7 +83,6 @@ class GitAutoDeploy(BaseHTTPRequestHandler):
         self.end_headers()
 
     def deploy(self, path):
-        self.log('Updating : ' + path)
         config = self.getConfig()
         for repository in config['repositories']:
             if(repository['path'] == path):
@@ -94,14 +93,15 @@ class GitAutoDeploy(BaseHTTPRequestHandler):
                 if 'cmd' in repository and repository['cmd']:
                     cmd = repository['cmd']
                 else:
-                    cmd = "git pull"
+                    cmd = "git fetch"
 
                 if  branch in [None, '', self.branch, os.path.basename(self.branch)]:
-                    self.log('Executing deploy command :' + cmd)
+                    self.log('Updating : %s <= %s'%(path, self.branch ))
+                    self.log('Executing deploy command :\n' + cmd)
                     call(['cd "%s" && %s' % (path, cmd)], shell=True)
-                else:
-                    self.log('Do nothing for different branch (%s != %s)' % (branch, self.branch))
-                break
+                # else:
+                #     self.log('Do nothing for different branch (%s != %s)' % (branch, self.branch))
+
 
     @classmethod
     def log(cls, *messages):
